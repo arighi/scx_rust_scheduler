@@ -1,7 +1,84 @@
 // Copyright (c) Andrea Righi <andrea.righi@linux.dev>
-//
+
 // This software may be used and distributed according to the terms of the
 // GNU General Public License version 2.
+
+//! # FIFO Linux kernel scheduler that runs in user-space
+//!
+//! ## Overview
+//!
+//! This is a fully functional FIFO scheduler for the Linux kernel that operates in user-space and
+//! it is 100% implemented in Rust.
+//!
+//! The scheduler is designed to serve as a simple template for developers looking to implement
+//! more advanced scheduling policies.
+//!
+//! It is based on `scx_rustland_core`, a framework that is specifically designed to simplify the
+//! creation of user-space schedulers, leveraging the Linux kernel's `sched_ext` feature (a
+//! technology that allows to implement schedulers in BPF).
+//!
+//! The `scx_rustland_core` crate offers an abstraction layer over `sched_ext`, enabling developers
+//! to write schedulers in Rust without needing to interact directly with low-level kernel or BPF
+//! internal details.
+//!
+//! ## scx_rustland_core API
+//!
+//! ### struct `BpfScheduler`
+//!
+//! The `BpfScheduler` struct is the core interface for interacting with `sched_ext` via BPF.
+//!
+//! - **Initialization**:
+//!   - `BpfScheduler::init()` registers the scheduler and initializes the BPF component.
+//!
+//! - **Task Management**:
+//!   - `dequeue_task()`: Consume a task that wants to run
+//!   - `select_cpu(pid: i32, prev_cpu: i32, flags: u64)`: Select an idle CPU for a task
+//!   - `dispatch_task(task: &DispatchedTask)`: Dispatch a task
+//!
+//! - **Completion Notification**:
+//!   - `notify_complete(nr_pending: u64)` Give control to the BPF component and report the number
+//!      of tasks that are still pending (this function can sleep)
+//!
+//! ## Task scheduling workflow
+//!
+//!  +----------------------------------------------+
+//!  | // task is received                          |
+//!  | task = BpfScheduler.dequeue_task()           |
+//!  +----------------------+-----------------------+
+//!                        |
+//!                        v
+//!  +----------------------------------------------+
+//!  | // Create a new task to dispatch             |
+//!  | dispatched_task = DispatchedTask::new(&task);|
+//!  +---------------------+------------------------+
+//!                        |
+//!                        v
+//!  +----------------------------------------------+
+//!  | // Pick an idle CPU for the task             |
+//!  | cpu = BpfScheduler.select_cpu()              |
+//!  +---------------------+------------------------+
+//!                        |
+//!                        v
+//!       +----------------+-----------------+
+//!       | cpu >= 0                         | cpu < 0
+//!       v                                  v
+//!  +----------------------------+    +-----------------------------+
+//!  | // Assign the idle CPU     |    | // Run on first CPU avail   |
+//!  +----------------------------+    +-----------------------------+
+//!        |                                 |
+//!        +---------------+-----------------+
+//!                        |
+//!                        v
+//!  +----------------------------------------------+
+//!  | // Dispatch the task                         |
+//!  | BpfScheduler.dispatch_task(dispatched_task)  |
+//!  +---------------------+------------------------+
+//!                        |
+//!                        v
+//!  +----------------------------------------------+
+//!  | // Notify BPF component                      |
+//!  | BpfScheduler.notify_complete()               |
+//!  +----------------------------------------------+
 
 mod bpf_skel;
 pub use bpf_skel::*;
