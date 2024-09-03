@@ -28,6 +28,23 @@ You also need the following binaries/packages in order to build the scheduler:
  - bpftool
  - libbpf
 
+### Ubuntu
+
+If you are using Ubuntu, you can run the following commands to setup an
+environment to build and test `scx_rust_scheduler`:
+
+ - install a `sched_ext` Ubuntu kernel and all the required user-space
+   dependencies:
+
+```
+$ sudo add-apt-repository -y --enable-source ppa:arighi/sched-ext
+$ sudo apt update -y
+$ sudo apt dist-upgrade -y
+$ sudo apt install -y rustc cargo libbpf-dev pkg-config clang
+```
+
+ - reboot the system
+
 ## Getting Started
 
  - **Build the scheduler**:
