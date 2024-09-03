@@ -28,6 +28,15 @@ You also need the following binaries/packages in order to build the scheduler:
  - bpftool
  - libbpf
 
+### CachyOS
+
+CachyOS ships a `sched_ext` kernel by default, so you only need to install the
+following user-space packages:
+
+```
+$ sudo pacman -S bpf libbpf rust clang pkgconf
+```
+
 ### Ubuntu
 
 If you are using Ubuntu, you can run the following commands to setup an
