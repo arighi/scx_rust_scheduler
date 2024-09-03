@@ -152,6 +152,7 @@ impl<'a> Scheduler<'a> {
             //                        // CPU available)
             //     pub slice_ns: u64, // time slice in nanoseconds assigned to the task
             //                        // (0 = use default)
+            //     pub vtime: u64,    // task deadline / vruntime
             // }
             //
             // The dispatched task's information are pre-populated from the QueuedTask and they can
