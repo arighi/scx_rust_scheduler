@@ -3,83 +3,6 @@
 // This software may be used and distributed according to the terms of the
 // GNU General Public License version 2.
 
-//! # FIFO Linux kernel scheduler that runs in user-space
-//!
-//! ## Overview
-//!
-//! This is a fully functional FIFO scheduler for the Linux kernel that operates in user-space and
-//! it is 100% implemented in Rust.
-//!
-//! The scheduler is designed to serve as a simple template for developers looking to implement
-//! more advanced scheduling policies.
-//!
-//! It is based on `scx_rustland_core`, a framework that is specifically designed to simplify the
-//! creation of user-space schedulers, leveraging the Linux kernel's `sched_ext` feature (a
-//! technology that allows to implement schedulers in BPF).
-//!
-//! The `scx_rustland_core` crate offers an abstraction layer over `sched_ext`, enabling developers
-//! to write schedulers in Rust without needing to interact directly with low-level kernel or BPF
-//! internal details.
-//!
-//! ## scx_rustland_core API
-//!
-//! ### struct `BpfScheduler`
-//!
-//! The `BpfScheduler` struct is the core interface for interacting with `sched_ext` via BPF.
-//!
-//! - **Initialization**:
-//!   - `BpfScheduler::init()` registers the scheduler and initializes the BPF component.
-//!
-//! - **Task Management**:
-//!   - `dequeue_task()`: Consume a task that wants to run
-//!   - `select_cpu(pid: i32, prev_cpu: i32, flags: u64)`: Select an idle CPU for a task
-//!   - `dispatch_task(task: &DispatchedTask)`: Dispatch a task
-//!
-//! - **Completion Notification**:
-//!   - `notify_complete(nr_pending: u64)` Give control to the BPF component and report the number
-//!      of tasks that are still pending (this function can sleep)
-//!
-//! ## Task scheduling workflow
-//!
-//!  +----------------------------------------------+
-//!  | // task is received                          |
-//!  | task = BpfScheduler.dequeue_task()           |
-//!  +----------------------+-----------------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Create a new task to dispatch             |
-//!  | dispatched_task = DispatchedTask::new(&task);|
-//!  +---------------------+------------------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Pick an idle CPU for the task             |
-//!  | cpu = BpfScheduler.select_cpu()              |
-//!  +---------------------+------------------------+
-//!                        |
-//!                        v
-//!       +----------------+-----------------+
-//!       | cpu >= 0                         | cpu < 0
-//!       v                                  v
-//!  +----------------------------+    +-----------------------------+
-//!  | // Assign the idle CPU     |    | // Run on first CPU avail   |
-//!  +----------------------------+    +-----------------------------+
-//!        |                                 |
-//!        +---------------+-----------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Dispatch the task                         |
-//!  | BpfScheduler.dispatch_task(dispatched_task)  |
-//!  +---------------------+------------------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Notify BPF component                      |
-//!  | BpfScheduler.notify_complete()               |
-//!  +----------------------------------------------+
-
 mod bpf_skel;
 pub use bpf_skel::*;
 pub mod bpf_intf;
@@ -91,8 +14,10 @@ use scx_utils::UserExitInfo;
 
 use libbpf_rs::OpenObject;
 
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::mem::MaybeUninit;
+use std::time::SystemTime;
 
 use anyhow::Result;
 
@@ -101,7 +26,8 @@ const SLICE_NS: u64 = 5_000_000;
 
 struct Scheduler<'a> {
     bpf: BpfScheduler<'a>,            // Connector to the sched_ext BPF backend
-    task_queue: VecDeque<QueuedTask>, // FIFO queue used to store tasks
+    task_queue: VecDeque<QueuedTask>, // Global queue used to temporarily store tasks
+    sum_exec_runtime: HashMap<i32, u64>,
 }
 
 impl<'a> Scheduler<'a> {
@@ -115,23 +41,12 @@ impl<'a> Scheduler<'a> {
         Ok(Self {
             bpf,
             task_queue: VecDeque::new(),
+            sum_exec_runtime: HashMap::new(),
         })
     }
 
     /// Consume all tasks that are ready to run.
     fn consume_tasks(&mut self) {
-        // Each task contains the following details:
-        //
-        // pub struct QueuedTask {
-        //     pub pid: i32,              // pid that uniquely identifies a task
-        //     pub cpu: i32,              // CPU where the task was running
-        //     pub sum_exec_runtime: u64, // Total cpu time in nanoseconds
-        //     pub weight: u64,           // Task static priority in the range [1..10000]
-        //                                // (default weight is 100)
-        // }
-        //
-        // Although the FIFO scheduler doesn't use these fields, they can provide valuable data for
-        // implementing more sophisticated scheduling policies.
         while let Ok(Some(task)) = self.bpf.dequeue_task() {
             self.task_queue.push_back(task);
         }
@@ -143,20 +58,6 @@ impl<'a> Scheduler<'a> {
         let nr_waiting = self.task_queue.len() as u64;
 
         while let Some(task) = self.task_queue.pop_front() {
-            // Create a new task to be dispatched, derived from the received enqueued task.
-            //
-            // pub struct DispatchedTask {
-            //     pub pid: i32,      // pid that uniquely identifies a task
-            //     pub cpu: i32,      // target CPU selected by the scheduler
-            //     pub flags: u64,    // special dispatch flags (RL_CPU_ANY = dispatch on the first
-            //                        // CPU available)
-            //     pub slice_ns: u64, // time slice in nanoseconds assigned to the task
-            //                        // (0 = use default)
-            //     pub vtime: u64,    // task deadline / vruntime
-            // }
-            //
-            // The dispatched task's information are pre-populated from the QueuedTask and they can
-            // be modified before dispatching it via self.bpf.dispatch_task().
             let mut dispatched_task = DispatchedTask::new(&task);
 
             // Decide where the task needs to run (pick a target CPU).
@@ -180,9 +81,27 @@ impl<'a> Scheduler<'a> {
             // If a time slice is not specified, a default value will be used (20ms).
             dispatched_task.slice_ns = SLICE_NS / (nr_waiting + 1);
 
+            // Evaluate task's previously used time slice looking at the total exec run-time.
+            let task_runtime = *self.sum_exec_runtime.get(&task.pid).unwrap_or(&0);
+            let task_slice = (task.sum_exec_runtime - task_runtime).min(SLICE_NS);
+            self.sum_exec_runtime
+                .insert(task.pid, task.sum_exec_runtime);
+
+            // Set task's deadline based on current time and weighted used time slice.
+            let deadline = Self::now() + task_slice * 100 / task.weight;
+            dispatched_task.vtime = deadline;
+
             // Dispatch the task.
             self.bpf.dispatch_task(&dispatched_task).unwrap();
         }
+    }
+
+    // Return current timestamp in ns.
+    fn now() -> u64 {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        ts.as_nanos() as u64
     }
 
     /// Scheduler main loop.
