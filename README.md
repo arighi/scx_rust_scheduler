@@ -1,22 +1,17 @@
-# Template to implement Linux kernel schedulers in Rust running in user-space
-
-## Overview
+# Overview
 
 `scx_rust_scheduler` is a fully functional FIFO scheduler for the Linux kernel
 that operates in user-space and it is 100% implemented in Rust.
 
-The scheduler is designed to serve as a simple template for developers looking
-to implement more advanced scheduling policies.
-
 It is based on `scx_rustland_core`, a framework that is specifically designed
 to simplify the creation of user-space schedulers, leveraging the Linux
-kernel's `sched_ext` feature.
+kernel's `sched_ext` feature and BPF.
 
-The `scx_rustland_core` crate offers an abstraction layer over `sched_ext`,
-enabling developers to write schedulers in Rust without needing to interact
-directly with low-level kernel or BPF internal details.
+The scheduler is intended to serve as a basic template for developers who want
+to experiment with more advanced scheduling policies without having to directly
+engage with low-level kernel internals.
 
-## Requirements
+# Requirements
 
 In order to run this scheduler you need a kernel that supports `sched_ext`
 (`CONFIG_SCHED_CLASS_EXT=y`).
@@ -28,7 +23,7 @@ You also need the following binaries/packages in order to build the scheduler:
  - bpftool
  - libbpf
 
-### CachyOS
+## CachyOS
 
 CachyOS ships a `sched_ext` kernel by default, so you only need to install the
 following user-space packages:
@@ -37,7 +32,7 @@ following user-space packages:
 $ sudo pacman -S bpf libbpf rust clang pkgconf
 ```
 
-### Ubuntu
+## Ubuntu
 
 If you are using Ubuntu, you can run the following commands to setup an
 environment to build and test `scx_rust_scheduler`:
@@ -54,7 +49,7 @@ $ sudo apt install -y rustc cargo libbpf-dev pkg-config clang
 
  - reboot the system
 
-## Getting Started
+# Getting Started
 
  - **Build the scheduler**:
 ```
@@ -74,12 +69,12 @@ Rust scheduler is disabled
 EXIT: Scheduler unregistered from user space
 ```
 
-## See also
+# See also
 
  - [sched_ext schedulers and tools](https://github.com/sched-ext/scx)
  - [scx_rustland_core documentation](https://github.com/sched-ext/scx/blob/main/rust/scx_rustland_core/README.md)
 
-## License
+# License
 
 This software is licensed under the GNU General Public License version 2. See
 the LICENSE file for details.
