@@ -139,6 +139,9 @@ impl<'a> Scheduler<'a> {
 
     /// Dispatch tasks that are ready to run.
     fn dispatch_tasks(&mut self) {
+        // Get the amount of tasks that are waiting to be scheduled.
+        let nr_waiting = self.task_queue.len() as u64;
+
         while let Some(task) = self.task_queue.pop_front() {
             // Create a new task to be dispatched, derived from the received enqueued task.
             //
@@ -170,10 +173,11 @@ impl<'a> Scheduler<'a> {
                 dispatched_task.flags |= RL_CPU_ANY;
             }
 
-            // Decide for how long the task needs to run (time slice)
+            // Determine the task's runtime (time slice): assign a time slice that is inversely
+            // proportional to the number of tasks waiting to be scheduled.
             //
             // If a time slice is not specified, a default value will be used (20ms).
-            dispatched_task.slice_ns = SLICE_NS;
+            dispatched_task.slice_ns = SLICE_NS / (nr_waiting + 1);
 
             // Dispatch the task.
             self.bpf.dispatch_task(&dispatched_task).unwrap();
