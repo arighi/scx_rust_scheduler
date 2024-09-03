@@ -96,7 +96,7 @@ use std::mem::MaybeUninit;
 
 use anyhow::Result;
 
-// Maximum time (in milliseconds) that a task can run before it is re-enqueued into the scheduler.
+// Maximum time (in nanoseconds) that a task can run before it is re-enqueued into the scheduler.
 const SLICE_NS: u64 = 5_000_000;
 
 struct Scheduler<'a> {
@@ -124,7 +124,7 @@ impl<'a> Scheduler<'a> {
         //
         // pub struct QueuedTask {
         //     pub pid: i32,              // pid that uniquely identifies a task
-        //     pub cpu: i32,              // CPU where the task is running
+        //     pub cpu: i32,              // CPU where the task was running
         //     pub sum_exec_runtime: u64, // Total cpu time in nanoseconds
         //     pub weight: u64,           // Task static priority in the range [1..10000]
         //                                // (default weight is 100)
@@ -137,9 +137,9 @@ impl<'a> Scheduler<'a> {
         }
     }
 
-    /// Dispatch next task ready to run.
-    fn dispatch_next_task(&mut self) {
-        if let Some(task) = self.task_queue.pop_front() {
+    /// Dispatch tasks that are ready to run.
+    fn dispatch_tasks(&mut self) {
+        while let Some(task) = self.task_queue.pop_front() {
             // Create a new task to be dispatched, derived from the received enqueued task.
             //
             // pub struct DispatchedTask {
@@ -155,29 +155,28 @@ impl<'a> Scheduler<'a> {
             // be modified before dispatching it via self.bpf.dispatch_task().
             let mut dispatched_task = DispatchedTask::new(&task);
 
-            // Decide where the task needs to run (target CPU).
+            // Decide where the task needs to run (pick a target CPU).
             //
             // A call to select_cpu() will return the most suitable idle CPU for the task,
-            // considering its previously used CPU.
+            // prioritizing its previously used CPU (available in task.cpu).
+            //
+            // If a CPU is not specified the task will be dispatched to the previously used CPU.
             let cpu = self.bpf.select_cpu(task.pid, task.cpu, 0);
             if cpu >= 0 {
                 // Run the task on the idle CPU that we just found.
                 dispatched_task.cpu = cpu;
             } else {
-                // If there's no idle CPU available, simply run on the first one available.
+                // No idle CPU available, simply run the task on the first CPU available.
                 dispatched_task.flags |= RL_CPU_ANY;
             }
 
-            // Decide for how long the task needs to run (time slice); if not specified
-            // SCX_SLICE_DFL will be used by default.
+            // Decide for how long the task needs to run (time slice)
+            //
+            // If a time slice is not specified, a default value will be used (20ms).
             dispatched_task.slice_ns = SLICE_NS;
 
-            // Dispatch the task on the target CPU.
+            // Dispatch the task.
             self.bpf.dispatch_task(&dispatched_task).unwrap();
-
-            // Notify the BPF component of the number of pending tasks and immediately give a
-            // chance to run to the dispatched task.
-            self.bpf.notify_complete(self.task_queue.len() as u64);
         }
     }
 
@@ -185,17 +184,16 @@ impl<'a> Scheduler<'a> {
     fn run(&mut self) -> Result<UserExitInfo> {
         println!("Rust scheduler is enabled (CTRL+c to exit)");
         while !self.bpf.exited() {
-            // Consume all tasks before dispatching any.
+            // Consume all the tasks that want to run.
             self.consume_tasks();
 
-            // Dispatch one task from the global queue.
-            self.dispatch_next_task();
+            // Dispatch all tasks from the global queue.
+            self.dispatch_tasks();
 
-            // If all tasks have been dispatched notify the BPF component that all tasks have been
-            // scheduled / dispatched, with 0 remaining pending tasks.
-            if self.task_queue.is_empty() {
-                self.bpf.notify_complete(0);
-            }
+            // Notify the BPF component that all the pending tasks have been dispatched.
+            //
+            // This function will put the scheduler to sleep, until another task needs to run.
+            self.bpf.notify_complete(0);
         }
 
         println!("Rust scheduler is disabled");
