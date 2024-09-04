@@ -31,7 +31,7 @@
 //!   - `BpfScheduler::init()` registers the scheduler and initializes the BPF component.
 //!
 //! - **Task Management**:
-//!   - `dequeue_task()`: Consume a task that wants to run
+//!   - `dequeue_task()`: Consume a task that wants to run, returns a QueuedTask object
 //!   - `select_cpu(pid: i32, prev_cpu: i32, flags: u64)`: Select an idle CPU for a task
 //!   - `dispatch_task(task: &DispatchedTask)`: Dispatch a task
 //!
@@ -39,46 +39,27 @@
 //!   - `notify_complete(nr_pending: u64)` Give control to the BPF component and report the number
 //!      of tasks that are still pending (this function can sleep)
 //!
-//! ## Task scheduling workflow
+//! Each task received from dequeue_task() contains the following:
 //!
-//!  +----------------------------------------------+
-//!  | // task is received                          |
-//!  | task = BpfScheduler.dequeue_task()           |
-//!  +----------------------+-----------------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Create a new task to dispatch             |
-//!  | dispatched_task = DispatchedTask::new(&task);|
-//!  +---------------------+------------------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Pick an idle CPU for the task             |
-//!  | cpu = BpfScheduler.select_cpu()              |
-//!  +---------------------+------------------------+
-//!                        |
-//!                        v
-//!       +----------------+-----------------+
-//!       | cpu >= 0                         | cpu < 0
-//!       v                                  v
-//!  +----------------------------+    +-----------------------------+
-//!  | // Assign the idle CPU     |    | // Run on first CPU avail   |
-//!  +----------------------------+    +-----------------------------+
-//!        |                                 |
-//!        +---------------+-----------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Dispatch the task                         |
-//!  | BpfScheduler.dispatch_task(dispatched_task)  |
-//!  +---------------------+------------------------+
-//!                        |
-//!                        v
-//!  +----------------------------------------------+
-//!  | // Notify BPF component                      |
-//!  | BpfScheduler.notify_complete()               |
-//!  +----------------------------------------------+
+//! struct QueuedTask {
+//!     pub pid: i32,              // pid that uniquely identifies a task
+//!     pub cpu: i32,              // CPU previously used by the task
+//!     pub sum_exec_runtime: u64, // Total cpu time in nanoseconds
+//!     pub weight: u64,           // Task priority in the range [1..10000] (default is 100)
+//! }
+//!
+//! Each task dispatched using dispatch_task() contains the following:
+//!
+//! struct DispatchedTask {
+//!     pub pid: i32,      // pid that uniquely identifies a task
+//!     pub cpu: i32,      // target CPU selected by the scheduler
+//!     pub flags: u64,    // special dispatch flags (RL_CPU_ANY = dispatch on the first
+//!                        // CPU available)
+//!     pub slice_ns: u64, // time slice in nanoseconds assigned to the task
+//!                        // (0 = use default)
+//!     pub vtime: u64,    // this value can be used to send the task's vruntime or deadline
+//!                        // directly to the underlying BPF dispatcher
+//! }
 
 mod bpf_skel;
 pub use bpf_skel::*;
@@ -96,7 +77,7 @@ use std::mem::MaybeUninit;
 
 use anyhow::Result;
 
-// Maximum time (in nanoseconds) that a task can run before it is re-enqueued into the scheduler.
+// Maximum time slice (in nanoseconds) that a task can use before it is re-enqueued.
 const SLICE_NS: u64 = 5_000_000;
 
 struct Scheduler<'a> {
@@ -120,18 +101,6 @@ impl<'a> Scheduler<'a> {
 
     /// Consume all tasks that are ready to run.
     fn consume_tasks(&mut self) {
-        // Each task contains the following details:
-        //
-        // pub struct QueuedTask {
-        //     pub pid: i32,              // pid that uniquely identifies a task
-        //     pub cpu: i32,              // CPU where the task was running
-        //     pub sum_exec_runtime: u64, // Total cpu time in nanoseconds
-        //     pub weight: u64,           // Task static priority in the range [1..10000]
-        //                                // (default weight is 100)
-        // }
-        //
-        // Although the FIFO scheduler doesn't use these fields, they can provide valuable data for
-        // implementing more sophisticated scheduling policies.
         while let Ok(Some(task)) = self.bpf.dequeue_task() {
             self.task_queue.push_back(task);
         }
@@ -143,28 +112,13 @@ impl<'a> Scheduler<'a> {
         let nr_waiting = self.task_queue.len() as u64;
 
         while let Some(task) = self.task_queue.pop_front() {
-            // Create a new task to be dispatched, derived from the received enqueued task.
-            //
-            // pub struct DispatchedTask {
-            //     pub pid: i32,      // pid that uniquely identifies a task
-            //     pub cpu: i32,      // target CPU selected by the scheduler
-            //     pub flags: u64,    // special dispatch flags (RL_CPU_ANY = dispatch on the first
-            //                        // CPU available)
-            //     pub slice_ns: u64, // time slice in nanoseconds assigned to the task
-            //                        // (0 = use default)
-            //     pub vtime: u64,    // task deadline / vruntime
-            // }
-            //
-            // The dispatched task's information are pre-populated from the QueuedTask and they can
-            // be modified before dispatching it via self.bpf.dispatch_task().
+            // Create a new task to be dispatched from the received enqueued task.
             let mut dispatched_task = DispatchedTask::new(&task);
 
             // Decide where the task needs to run (pick a target CPU).
             //
             // A call to select_cpu() will return the most suitable idle CPU for the task,
             // prioritizing its previously used CPU (available in task.cpu).
-            //
-            // If a CPU is not specified the task will be dispatched to the previously used CPU.
             let cpu = self.bpf.select_cpu(task.pid, task.cpu, 0);
             if cpu >= 0 {
                 // Run the task on the idle CPU that we just found.
@@ -174,10 +128,8 @@ impl<'a> Scheduler<'a> {
                 dispatched_task.flags |= RL_CPU_ANY;
             }
 
-            // Determine the task's runtime (time slice): assign a time slice that is inversely
-            // proportional to the number of tasks waiting to be scheduled.
-            //
-            // If a time slice is not specified, a default value will be used (20ms).
+            // Determine the task's time slice: assign value inversely proportional to the number
+            // of tasks waiting to be scheduled.
             dispatched_task.slice_ns = SLICE_NS / (nr_waiting + 1);
 
             // Dispatch the task.
