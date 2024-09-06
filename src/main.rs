@@ -60,6 +60,19 @@
 //!     pub vtime: u64,    // this value can be used to send the task's vruntime or deadline
 //!                        // directly to the underlying BPF dispatcher
 //! }
+//!
+//! Other internal statistics that can be used to implement better scheduling policies:
+//!
+//!  let n: u64 = *self.bpf.nr_online_cpus_mut();       // amount of online CPUs
+//!  let n: u64 = *self.bpf.nr_running_mut();           // amount of currently running tasks
+//!  let n: u64 = *self.bpf.nr_queued_mut();            // amount of tasks queued to be scheduled
+//!  let n: u64 = *self.bpf.nr_scheduled_mut();         // amount of tasks managed by the user-space scheduler
+//!  let n: u64 = *self.bpf.nr_user_dispatches_mut();   // amount of user-space dispatches
+//!  let n: u64 = *self.bpf.nr_kernel_dispatches_mut(); // amount of kernel dispatches
+//!  let n: u64 = *self.bpf.nr_cancel_dispatches_mut(); // amount of cancelled dispatches
+//!  let n: u64 = *self.bpf.nr_bounce_dispatches_mut(); // amount of bounced dispatches
+//!  let n: u64 = *self.bpf.nr_failed_dispatches_mut(); // amount of failed dispatches
+//!  let n: u64 = *self.bpf.nr_sched_congested_mut();   // amount of scheduler congestion events
 
 mod bpf_skel;
 pub use bpf_skel::*;
@@ -80,7 +93,7 @@ use anyhow::Result;
 const SLICE_NS: u64 = 20_000_000;
 
 struct Scheduler<'a> {
-    bpf: BpfScheduler<'a>,            // Connector to the sched_ext BPF backend
+    bpf: BpfScheduler<'a>, // Connector to the sched_ext BPF backend
 }
 
 impl<'a> Scheduler<'a> {
@@ -91,9 +104,7 @@ impl<'a> Scheduler<'a> {
             false, // partial (false = include all tasks)
             false, // debug (false = debug mode off)
         )?;
-        Ok(Self {
-            bpf,
-        })
+        Ok(Self { bpf })
     }
 
     /// Consume all tasks that are ready to run and dispatch them.
