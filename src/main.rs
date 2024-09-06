@@ -72,7 +72,6 @@ use scx_utils::UserExitInfo;
 
 use libbpf_rs::OpenObject;
 
-use std::collections::VecDeque;
 use std::mem::MaybeUninit;
 
 use anyhow::Result;
@@ -82,7 +81,6 @@ const SLICE_NS: u64 = 5_000_000;
 
 struct Scheduler<'a> {
     bpf: BpfScheduler<'a>,            // Connector to the sched_ext BPF backend
-    task_queue: VecDeque<QueuedTask>, // FIFO queue used to store tasks
 }
 
 impl<'a> Scheduler<'a> {
@@ -95,38 +93,28 @@ impl<'a> Scheduler<'a> {
         )?;
         Ok(Self {
             bpf,
-            task_queue: VecDeque::new(),
         })
     }
 
-    /// Consume all tasks that are ready to run.
-    fn consume_tasks(&mut self) {
-        while let Ok(Some(task)) = self.bpf.dequeue_task() {
-            self.task_queue.push_back(task);
-        }
-    }
-
-    /// Dispatch tasks that are ready to run.
+    /// Consume all tasks that are ready to run and dispatch them.
     fn dispatch_tasks(&mut self) {
         // Get the amount of tasks that are waiting to be scheduled.
-        let nr_waiting = self.task_queue.len() as u64;
+        let nr_waiting = *self.bpf.nr_queued_mut();
 
-        while let Some(task) = self.task_queue.pop_front() {
+        // Start consuming and dispatching tasks, until all the CPUs are busy or there are no more
+        // tasks to be dispatched.
+        while let Ok(Some(task)) = self.bpf.dequeue_task() {
             // Create a new task to be dispatched from the received enqueued task.
             let mut dispatched_task = DispatchedTask::new(&task);
 
             // Decide where the task needs to run (pick a target CPU).
             //
             // A call to select_cpu() will return the most suitable idle CPU for the task,
-            // prioritizing its previously used CPU (available in task.cpu).
+            // prioritizing its previously used CPU (task.cpu).
+            //
+            // If we can't find any idle CPU, keep the task running on the same CPU.
             let cpu = self.bpf.select_cpu(task.pid, task.cpu, 0);
-            if cpu >= 0 {
-                // Run the task on the idle CPU that we just found.
-                dispatched_task.cpu = cpu;
-            } else {
-                // No idle CPU available, simply run the task on the first CPU available.
-                dispatched_task.flags |= RL_CPU_ANY;
-            }
+            dispatched_task.cpu = if cpu < 0 { task.cpu } else { cpu };
 
             // Determine the task's time slice: assign value inversely proportional to the number
             // of tasks waiting to be scheduled.
@@ -134,23 +122,24 @@ impl<'a> Scheduler<'a> {
 
             // Dispatch the task.
             self.bpf.dispatch_task(&dispatched_task).unwrap();
+
+            // Stop dispatching if all the CPUs are busy (select_cpu() couldn't find an idle CPU).
+            if cpu < 0 {
+                break;
+            }
         }
+
+        // Notify the BPF component that tasks have been dispatched.
+        //
+        // This function will put the scheduler to sleep, until another task needs to run.
+        self.bpf.notify_complete(0);
     }
 
     /// Scheduler main loop.
     fn run(&mut self) -> Result<UserExitInfo> {
         println!("Rust scheduler is enabled (CTRL+c to exit)");
         while !self.bpf.exited() {
-            // Consume all the tasks that want to run.
-            self.consume_tasks();
-
-            // Dispatch all tasks from the global queue.
             self.dispatch_tasks();
-
-            // Notify the BPF component that all the pending tasks have been dispatched.
-            //
-            // This function will put the scheduler to sleep, until another task needs to run.
-            self.bpf.notify_complete(0);
         }
 
         println!("Rust scheduler is disabled");
