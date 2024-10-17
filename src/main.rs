@@ -89,6 +89,7 @@ use scx_utils::UserExitInfo;
 use libbpf_rs::OpenObject;
 
 use std::mem::MaybeUninit;
+use std::time::SystemTime;
 
 use anyhow::Result;
 
@@ -143,13 +144,61 @@ impl<'a> Scheduler<'a> {
         self.bpf.notify_complete(0);
     }
 
+    /// Print scheduling statistics.
+    fn print_stats(
+        &mut self,
+        prev_user_dispatches: u64,
+        prev_kernel_dispatches: u64,
+    ) -> (u64, u64) {
+        let nr_user_dispatches = *self.bpf.nr_user_dispatches_mut();
+        let nr_kernel_dispatches = *self.bpf.nr_kernel_dispatches_mut();
+
+        // Calculate the deltas for user and kernel dispatches.
+        //
+        // User dispatches refer to tasks scheduled in user-space, while kernel dispatches handle
+        // critical tasks executed internally by the scx_rustland_core framework.
+        let delta_user_dispatches = nr_user_dispatches - prev_user_dispatches;
+        let delta_kernel_dispatches = nr_kernel_dispatches - prev_kernel_dispatches;
+
+        println!(
+            "task dispatches/s -> user: {:<5} | kernel: {:<5}",
+            delta_user_dispatches, delta_kernel_dispatches,
+        );
+
+        // Return the current values to update the previous ones in the next iteration.
+        (nr_user_dispatches, nr_kernel_dispatches)
+    }
+
+    /// Return the current timestamp in seconds.
+    fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
     /// Scheduler main loop.
     fn run(&mut self) -> Result<UserExitInfo> {
+        let mut prev_ts = Self::now();
+        let mut prev_user_dispatches = 0;
+        let mut prev_kernel_dispatches = 0;
+
         println!("Rust scheduler is enabled (CTRL+c to exit)");
         while !self.bpf.exited() {
-            self.schedule();
-        }
+            let curr_ts = Self::now();
 
+            self.schedule();
+
+            if curr_ts > prev_ts {
+                let (new_user_dispatches, new_kernel_dispatches) =
+                    self.print_stats(prev_user_dispatches, prev_kernel_dispatches);
+
+                prev_user_dispatches = new_user_dispatches;
+                prev_kernel_dispatches = new_kernel_dispatches;
+
+                prev_ts = curr_ts;
+            }
+        }
         println!("Rust scheduler is disabled");
         self.bpf.shutdown_and_report()
     }
