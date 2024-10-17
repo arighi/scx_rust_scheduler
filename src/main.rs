@@ -93,7 +93,7 @@ use std::mem::MaybeUninit;
 use anyhow::Result;
 
 // Maximum time slice (in nanoseconds) that a task can use before it is re-enqueued.
-const SLICE_NS: u64 = 20_000_000;
+const SLICE_NS: u64 = 5_000_000;
 
 struct Scheduler<'a> {
     bpf: BpfScheduler<'a>, // Connector to the sched_ext BPF backend
@@ -111,7 +111,10 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Consume all tasks that are ready to run and dispatch them.
-    fn dispatch_tasks(&mut self) {
+    fn schedule(&mut self) {
+        // Get the amount of tasks that are waiting to be scheduled.
+        let nr_waiting = *self.bpf.nr_queued_mut();
+
         // Start consuming and dispatching tasks, until all the CPUs are busy or there are no more
         // tasks to be dispatched.
         while let Ok(Some(task)) = self.bpf.dequeue_task() {
@@ -123,20 +126,15 @@ impl<'a> Scheduler<'a> {
             // A call to select_cpu() will return the most suitable idle CPU for the task,
             // prioritizing its previously used CPU (task.cpu).
             //
-            // If we can't find any idle CPU, keep the task running on the same CPU.
+            // If we can't find any idle CPU, run on the first CPU available (RL_CPU_ANY).
             let cpu = self.bpf.select_cpu(task.pid, task.cpu, task.flags);
-            dispatched_task.cpu = if cpu < 0 { task.cpu } else { cpu };
+            dispatched_task.cpu = if cpu >= 0 { cpu } else { RL_CPU_ANY };
 
             // Assign a fixed time slice to all tasks.
-            dispatched_task.slice_ns = SLICE_NS;
+            dispatched_task.slice_ns = SLICE_NS / (nr_waiting + 1);
 
             // Dispatch the task.
             self.bpf.dispatch_task(&dispatched_task).unwrap();
-
-            // Stop dispatching if all the CPUs are busy (select_cpu() couldn't find an idle CPU).
-            if cpu < 0 {
-                break;
-            }
         }
 
         // Notify the BPF component that tasks have been dispatched.
@@ -149,7 +147,7 @@ impl<'a> Scheduler<'a> {
     fn run(&mut self) -> Result<UserExitInfo> {
         println!("Rust scheduler is enabled (CTRL+c to exit)");
         while !self.bpf.exited() {
-            self.dispatch_tasks();
+            self.schedule();
         }
 
         println!("Rust scheduler is disabled");
