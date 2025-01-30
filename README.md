@@ -69,6 +69,31 @@ Rust scheduler is disabled
 EXIT: Scheduler unregistered from user space
 ```
 
+# Setting up a virtual environment for testing
+
+If your distro doesn't provide a kernel recent enough (>= v6.12), you can
+use [virtme-ng](https://github.com/arighi/virtme-ng) to setup a testing
+environment to run your Rust scheduler.
+
+Example:
+ - Install virtme-ng:
+```
+ $ pip install --break-sysmstem-packages virtme-ng
+```
+ - Get the Rust scheduler template and build it:
+```
+ $ git clone https://github.com/arighi/scx_rust_scheduler.git
+ $ cd scx_rust_scheduler
+ $ cargo build
+```
+ - Run the scheduler inside a virtme-ng session:
+```
+ $ vng --ssh -vr v6.13-rc1 -- ./target/debug/scx_rust_scheduler
+```
+ - Test: now from another shell session run `vng --ssh-client` to get an
+   interactive shell session where you can run commands to stress test your
+   scheduler.
+
 # See also
 
  - [sched_ext schedulers and tools](https://github.com/sched-ext/scx)
