@@ -447,24 +447,6 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libbpf-cargo"
-version = "0.24.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "704727a07f185a76c58faa7b8ed08fba3194661c212183aea1174fe2970ee185"
-dependencies = [
- "anyhow",
- "cargo_metadata 0.15.4",
- "clap",
- "libbpf-rs 0.24.8",
- "memmap2",
- "regex",
- "semver",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "libbpf-cargo"
 version = "0.25.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d78971d366f266fd02f310b68e8cbf08ebaa35d7dd458ba98360448d8bb25467"
@@ -771,19 +753,19 @@ dependencies = [
  "libc",
  "plain",
  "scx_rustland_core",
- "scx_utils 1.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "scx_utils",
 ]
 
 [[package]]
 name = "scx_rustland_core"
-version = "2.2.5"
-source = "git+https://github.com/sched-ext/scx?branch=bpfland-next#adde76454697c392a55e17261acb6d28fcbaa0f3"
+version = "2.2.6"
+source = "git+https://github.com/sched-ext/scx?branch=main#85f819d44c714b41b7258b3583f7907b56f3fb0d"
 dependencies = [
  "anyhow",
  "libbpf-rs 0.25.0-beta.1",
  "libc",
  "plain",
- "scx_utils 1.0.9 (git+https://github.com/sched-ext/scx?branch=bpfland-next)",
+ "scx_utils",
  "tar",
  "walkdir",
 ]
@@ -791,24 +773,7 @@ dependencies = [
 [[package]]
 name = "scx_stats"
 version = "1.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80e6598179adab127711dc61bc29a23c47ab61cd6a594696467ee38b4f335a2f"
-dependencies = [
- "anyhow",
- "crossbeam",
- "libc",
- "log",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn",
-]
-
-[[package]]
-name = "scx_stats"
-version = "1.0.8"
-source = "git+https://github.com/sched-ext/scx?branch=bpfland-next#adde76454697c392a55e17261acb6d28fcbaa0f3"
+source = "git+https://github.com/sched-ext/scx?branch=main#85f819d44c714b41b7258b3583f7907b56f3fb0d"
 dependencies = [
  "anyhow",
  "crossbeam",
@@ -824,8 +789,7 @@ dependencies = [
 [[package]]
 name = "scx_utils"
 version = "1.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c236364299e438cb45fa5433d2e062c774eaa606e913013f841c598bd947cfb0"
+source = "git+https://github.com/sched-ext/scx?branch=main#85f819d44c714b41b7258b3583f7907b56f3fb0d"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -833,41 +797,14 @@ dependencies = [
  "glob",
  "hex",
  "lazy_static",
- "libbpf-cargo 0.24.8",
- "libbpf-rs 0.24.8",
- "libbpf-sys",
- "libc",
- "log",
- "paste",
- "regex",
- "scx_stats 1.0.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "sscanf",
- "tar",
- "vergen",
- "version-compare",
- "walkdir",
-]
-
-[[package]]
-name = "scx_utils"
-version = "1.0.9"
-source = "git+https://github.com/sched-ext/scx?branch=bpfland-next#adde76454697c392a55e17261acb6d28fcbaa0f3"
-dependencies = [
- "anyhow",
- "bindgen",
- "bitvec",
- "glob",
- "hex",
- "lazy_static",
- "libbpf-cargo 0.25.0-beta.1",
+ "libbpf-cargo",
  "libbpf-rs 0.25.0-beta.1",
  "libbpf-sys",
  "libc",
  "log",
  "paste",
  "regex",
- "scx_stats 1.0.8 (git+https://github.com/sched-ext/scx?branch=bpfland-next)",
+ "scx_stats",
  "serde",
  "sscanf",
  "tar",

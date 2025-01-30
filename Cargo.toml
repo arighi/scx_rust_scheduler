@@ -9,9 +9,9 @@ plain = "0.2.3"
 ctrlc = { version = "3.1", features = ["termination"] }
 libbpf-rs = "0.24.1"
 libc = "0.2.137"
-scx_utils = "1.0.3"
+scx_utils ={ git = "https://github.com/sched-ext/scx", branch = "main" }
 scx_rustland_core = { git = "https://github.com/sched-ext/scx", branch = "main" }
 
 [build-dependencies]
-scx_utils = "1.0.3"
+scx_utils ={ git = "https://github.com/sched-ext/scx", branch = "main" }
 scx_rustland_core = { git = "https://github.com/sched-ext/scx", branch = "main" }
