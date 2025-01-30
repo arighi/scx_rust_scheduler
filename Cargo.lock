@@ -758,8 +758,9 @@ dependencies = [
 
 [[package]]
 name = "scx_rustland_core"
-version = "2.2.6"
-source = "git+https://github.com/sched-ext/scx?branch=main#85f819d44c714b41b7258b3583f7907b56f3fb0d"
+version = "2.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0db42c172e3342227948c935e83725dae4186954191931b49aac4cd817d5182b"
 dependencies = [
  "anyhow",
  "libbpf-rs 0.25.0-beta.1",
@@ -773,7 +774,8 @@ dependencies = [
 [[package]]
 name = "scx_stats"
 version = "1.0.8"
-source = "git+https://github.com/sched-ext/scx?branch=main#85f819d44c714b41b7258b3583f7907b56f3fb0d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80e6598179adab127711dc61bc29a23c47ab61cd6a594696467ee38b4f335a2f"
 dependencies = [
  "anyhow",
  "crossbeam",
@@ -788,8 +790,9 @@ dependencies = [
 
 [[package]]
 name = "scx_utils"
-version = "1.0.9"
-source = "git+https://github.com/sched-ext/scx?branch=main#85f819d44c714b41b7258b3583f7907b56f3fb0d"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "074a1c38a9f04913a9e7f8e6c8c9565fdb1ba08c2ef9f60fd9e9df9a1db73743"
 dependencies = [
  "anyhow",
  "bindgen",
